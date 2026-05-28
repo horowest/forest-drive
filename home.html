@@ -236,8 +236,8 @@
             // 0x7ec0ee  // Clear day - afternoon
         ];
         let skyColorPicker = 0;
-        const SKY_HOLD_DURATION = 60000; // 60 seconds each static color
-        const SKY_TRANSITION_DURATION = 30000; // 30 seconds blend time
+        const SKY_HOLD_DURATION = 60000; // each static color in seconds
+        const SKY_TRANSITION_DURATION = 30000; // blend time in seconds
 
         let scene;
         let camera;
@@ -253,6 +253,7 @@
         let fogTimer = 0;
         let fogTransitionTime = 7000;
         let skyColor;
+        let skyStartColor;
         let skyTargetColor;
         let skyPhase = 'hold';
         let skyPhaseTimer = 0;
@@ -436,6 +437,7 @@
             const nextColor = SKY_COLORS[skyColorPicker];
             skyColorPicker = (skyColorPicker + 1) % SKY_COLORS.length;
 
+            skyStartColor = skyColor.clone();
             skyTargetColor.set(nextColor);
             skyPhase = 'transition';
             skyPhaseTimer = 0;
@@ -450,8 +452,8 @@
                     chooseNextSkyTarget();
                 }
             } else {
-                const step = Math.min(1, delta / SKY_TRANSITION_DURATION);
-                skyColor.lerp(skyTargetColor, step);
+                const progress = Math.min(1, skyPhaseTimer / SKY_TRANSITION_DURATION);
+                skyColor.copy(skyStartColor).lerp(skyTargetColor, progress);
 
                 if (skyPhaseTimer >= SKY_TRANSITION_DURATION) {
                     skyPhase = 'hold';
@@ -474,7 +476,7 @@
             if (fogTimer >= fogChangeInterval) {
                 chooseNextFogTarget();
             }
-            const step = Math.min(1, delta / fogTransitionTime);
+            const step = Math.min(1, fogTimer / fogTransitionTime);
             fogDensity += (fogTarget - fogDensity) * step;
             scene.fog.density = fogDensity;
         }
