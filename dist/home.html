@@ -5,23 +5,62 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Project Silent Forest - Step 3</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #d19a8a; }
+        body {
+            margin: 0; overflow: hidden; background-color: #d19a8a; 
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
         canvas { display: block; }
         #ui {
-            position: absolute; top: 30px; left: 30px; color: #ffffff;
-            pointer-events: none; text-transform: uppercase; letter-spacing: 3px;
-            font-weight: bold; text-shadow: 0px 0px 10px rgba(209, 154, 138, 0.5);
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            left: auto;
+            display: flex;
+            align-items: flex-end;
+            gap: 30px;
+            color: rgba(255, 255, 255, 0.88);
+            pointer-events: none;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            line-height: 1.05;
+            letter-spacing: 0.02em;
+            text-shadow: 0 0 18px rgba(255, 255, 255, 0.12);
+        }
+        #ui .hud-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: flex-end;
+        }
+        #ui .hud-label {
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.22em;
+            opacity: 0.55;
+        }
+        #ui .hud-value {
+            font-size: 2.6rem;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+        }
+        #ui .hud-unit {
+            margin-left: 0.4rem;
+            font-size: 1rem;
+            font-weight: 500;
+            opacity: 0.7;
+        }
+        #ui .hud-value strong {
+            font-weight: 700;
         }
         #crash-msg {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            color: #702020; font-size: 20px; display: none; font-weight: bold;
-            background: rgba(209, 154, 138, 0.8); padding: 20px; border-radius: 5px;
+            color: #f8f0e8; font-size: 20px; display: none; font-weight: 700;
+            background: rgba(209, 154, 138, 0.88); padding: 20px; border-radius: 8px;
         }
         .controls { position: absolute; bottom: 20px; left: 30px; color: #ffffff; font-size: 12px; opacity: 0.6; }
         #status-bar {
             position: absolute;
             top: 18px;
-            left: 18px;
+            left: 10px;
             display: flex;
             align-items: center;
             gap: 10px;
@@ -99,8 +138,9 @@
         }
         #calibration-alert.show { opacity: 1; }
     </style>
-  <script type="module" crossorigin src="/assets/home-CsOmK-3t.js"></script>
+  <script type="module" crossorigin src="/assets/home-C2ByCb9s.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
+  <link rel="modulepreload" crossorigin href="/assets/browser-CjSdxGTc.js">
 </head>
 <body>
     <div id="status-bar">
@@ -113,7 +153,20 @@
         <div class="room-code"><span>ROOM</span> <strong id="room-code">------</strong></div>
         <div id="qr-loader">Generating pairing QR…</div>
     </div>
-    <div id="ui">Distance: <span id="dist">0</span>m</div>
+    <div id="ui">
+        <div class="hud-item">
+            <div class="hud-label">Distance</div>
+            <div class="hud-value"><strong id="dist">0</strong><span class="hud-unit">m</span></div>
+        </div>
+        <div class="hud-item">
+            <div class="hud-label">Speed</div>
+            <div class="hud-value"><strong id="speed-ui">0</strong><span class="hud-unit">km/h</span></div>
+        </div>
+        <div class="hud-item">
+            <div class="hud-label">Steering</div>
+            <div class="hud-value"><strong id="steer">0</strong><span class="hud-unit">°</span></div>
+        </div>
+    </div>
     <div id="crash-msg">OFF ROAD - STEER BACK TO ASPHALT</div>
     <div class="controls">WASD / ARROWS TO DRIVE</div>
     <div id="calibration-alert">CALIBRATED</div>

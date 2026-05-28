@@ -5,23 +5,62 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Project Silent Forest - Step 3</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #d19a8a; }
+        body {
+            margin: 0; overflow: hidden; background-color: #d19a8a; 
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
         canvas { display: block; }
         #ui {
-            position: absolute; top: 30px; left: 30px; color: #ffffff;
-            pointer-events: none; text-transform: uppercase; letter-spacing: 3px;
-            font-weight: bold; text-shadow: 0px 0px 10px rgba(209, 154, 138, 0.5);
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            left: auto;
+            display: flex;
+            align-items: flex-end;
+            gap: 30px;
+            color: rgba(255, 255, 255, 0.88);
+            pointer-events: none;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            line-height: 1.05;
+            letter-spacing: 0.02em;
+            text-shadow: 0 0 18px rgba(255, 255, 255, 0.12);
+        }
+        #ui .hud-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            align-items: flex-end;
+        }
+        #ui .hud-label {
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.22em;
+            opacity: 0.55;
+        }
+        #ui .hud-value {
+            font-size: 2.6rem;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+        }
+        #ui .hud-unit {
+            margin-left: 0.4rem;
+            font-size: 1rem;
+            font-weight: 500;
+            opacity: 0.7;
+        }
+        #ui .hud-value strong {
+            font-weight: 700;
         }
         #crash-msg {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            color: #702020; font-size: 20px; display: none; font-weight: bold;
-            background: rgba(209, 154, 138, 0.8); padding: 20px; border-radius: 5px;
+            color: #f8f0e8; font-size: 20px; display: none; font-weight: 700;
+            background: rgba(209, 154, 138, 0.88); padding: 20px; border-radius: 8px;
         }
         .controls { position: absolute; bottom: 20px; left: 30px; color: #ffffff; font-size: 12px; opacity: 0.6; }
         #status-bar {
             position: absolute;
-            top: 23px;
-            left: 40%;
+            top: 18px;
+            left: 10px;
             display: flex;
             align-items: center;
             gap: 10px;
@@ -111,7 +150,20 @@
         <div class="room-code"><span>ROOM</span> <strong id="room-code">------</strong></div>
         <div id="qr-loader">Generating pairing QR…</div>
     </div>
-    <div id="ui">Distance: <span id="dist">0</span>m | Speed: <span id="speed-ui">0</span> | Steering: <span id="steer">0</span></div>
+    <div id="ui">
+        <div class="hud-item">
+            <div class="hud-label">Distance</div>
+            <div class="hud-value"><strong id="dist">0</strong><span class="hud-unit">m</span></div>
+        </div>
+        <div class="hud-item">
+            <div class="hud-label">Speed</div>
+            <div class="hud-value"><strong id="speed-ui">0</strong><span class="hud-unit">km/h</span></div>
+        </div>
+        <div class="hud-item">
+            <div class="hud-label">Steering</div>
+            <div class="hud-value"><strong id="steer">0</strong><span class="hud-unit">°</span></div>
+        </div>
+    </div>
     <div id="crash-msg">OFF ROAD - STEER BACK TO ASPHALT</div>
     <div class="controls">WASD / ARROWS TO DRIVE</div>
     <div id="calibration-alert">CALIBRATED</div>
@@ -148,8 +200,9 @@
             road: 0x1a1a1a,
             yellow: 0xf2a900,
             white: 0xcccccc,
-            tree: 0xffffff, // 0x050805,
-            car: 0xaaafaa
+            tree: 0x050805,
+            car: 0xaaafaa,
+            fog: 0xd7d0ff
         };
         
         const ROAD_WIDTH = 15;
@@ -157,7 +210,7 @@
         const SEGMENT_RES = 40;
         const VISIBLE_SEGMENTS = 15;
         const CURVE_AMPLITUDE = 15;
-        const TREES_PER_SEGMENT = 10; // Density
+        const TREES_PER_SEGMENT = 30; // Density
         const SEG_LEN = 40;
         const VISIBLE_SEGS = 15;
         const CURVE_AMP = 20;
@@ -165,11 +218,27 @@
         const STRAIGHT_LIMIT = 80;
         const CURVE_TRANSITION = 60;
 
-        // Physics
-        const ACCEL = 0.005;
+        // Physics - Realistic acceleration stages
+        const BASE_ACCEL = 0.0008; // Base acceleration when throttle is applied
+        const MAX_SPEED = 2;
         const FRICTION = 0.98;
         const STEER_SPEED = 0.04;
-        const MAX_SPEED = 1.2;
+        
+        // Speed ranges for different acceleration stages
+        const INITIAL_DRAG_THRESHOLD = 0.05; // Below this, there's resistance to start moving
+        const MID_RANGE_SPEED = 0.8; // Speed where mid-range acceleration peaks
+        const HIGH_SPEED_THRESHOLD = 1.2; // Speed where acceleration significantly drops
+
+        const SKY_COLORS = [
+            0xd19a8a, // Default warm sky
+            0x537691, // Twilight
+            0x1d3f58, // Deep dusk
+            0xb4cde5, // Soft overcast - morning
+            0x7ec0ee  // Clear day - afternoon
+        ];
+        let skyColorPicker = 0;
+        const SKY_CHANGE_INTERVAL = 60000; // 1 minute
+        const SKY_CHANGE_INTERVAL_SUB = 60000; // 1 minute
 
         let scene;
         let camera;
@@ -180,6 +249,18 @@
         let ground;
         let roadSegments = [];
         let currentZ = 0;
+        let fogDensity = 0.002;
+        let fogTarget = 0.001;
+        let fogTimer = 0;
+        let fogTransitionTime = 7000;
+        let skyColor;
+        let skyTargetColor;
+        let skyTimer = 0;
+        let skyTransitionTime = 7000;
+        let skyChangeInterval = getRandomSkyInterval();
+        let skyTargetIsSunset = false;
+        let lastFrameTime = performance.now();
+        let fogChangeInterval = getRandomFogInterval();
 
         let speed = 0;
         let carAngle = 0;
@@ -333,13 +414,107 @@
             return Math.sin(z * CURVE_FREQ) * CURVE_AMP * easedStrength;
         }
 
+        function getRandomFogInterval() {
+            return 30000 + Math.random() * 30000; // 30-60 seconds
+        }
+
+        function chooseNextFogTarget() {
+            fogTarget = Math.random() < 0.5 ? 0.002 : 0.022;
+            fogTransitionTime = 10000 + Math.random() * 5000; // 10-15 seconds blend
+            fogChangeInterval = getRandomFogInterval();
+            fogTimer = 0;
+        }
+
+        function getRandomSkyInterval() {
+            return SKY_CHANGE_INTERVAL + Math.random() * SKY_CHANGE_INTERVAL_SUB; // 1-2 minutes
+        }
+
+        function chooseNextSkyTarget() {
+            const nextColor = SKY_COLORS[skyColorPicker];
+            skyColorPicker = (skyColorPicker + 1) % SKY_COLORS.length;
+
+            skyTargetColor.set(nextColor);
+            skyTransitionTime = 10000 + Math.random() * 10000; // 10-20 seconds blend
+            skyChangeInterval = getRandomSkyInterval();
+            skyTimer = 0;
+        }
+
+        function updateSky(delta) {
+            if (!scene || !scene.background) return;
+            skyTimer += delta;
+            if (skyTimer >= skyChangeInterval) {
+                chooseNextSkyTarget();
+            }
+            const step = Math.min(1, delta / skyTransitionTime);
+            skyColor.lerp(skyTargetColor, step);
+            if (scene.background.isColor) {
+                scene.background.copy(skyColor);
+            }
+            if (scene.fog) {
+                scene.fog.color.copy(skyColor);
+            }
+        }
+
+        function updateFog(delta) {
+            if (!scene || !scene.fog) return;
+            fogTimer += delta;
+            if (fogTimer >= fogChangeInterval) {
+                chooseNextFogTarget();
+            }
+            const step = Math.min(1, delta / fogTransitionTime);
+            fogDensity += (fogTarget - fogDensity) * step;
+            scene.fog.density = fogDensity;
+        }
+
+        function calculateAcceleration(currentSpeed, throttleApplied) {
+            if (!throttleApplied) return 0;
+            
+            const normalizedSpeed = currentSpeed / MAX_SPEED; // 0 to 1
+            
+            // Stage 1: Initial drag (0 to 0.05) - Hard to start moving
+            if (currentSpeed < INITIAL_DRAG_THRESHOLD) {
+                // Exponential curve: hard to overcome inertia initially
+                return BASE_ACCEL * 2.5;
+            }
+            
+            // Stage 2: Mid-range (0.05 to 1.0) - Easy acceleration
+            if (currentSpeed < MID_RANGE_SPEED) {
+                // Linear acceleration, easier in this range
+                const progress = (currentSpeed - INITIAL_DRAG_THRESHOLD) / (MID_RANGE_SPEED - INITIAL_DRAG_THRESHOLD);
+                return BASE_ACCEL * (2.0 - progress * 0.5); // Gradually decrease from 2.0 to 1.5
+            }
+            
+            // Stage 3: High speed (1.0 to 1.5) - Diminishing returns
+            if (currentSpeed < HIGH_SPEED_THRESHOLD) {
+                // Moderate deceleration of acceleration
+                const progress = (currentSpeed - MID_RANGE_SPEED) / (HIGH_SPEED_THRESHOLD - MID_RANGE_SPEED);
+                return BASE_ACCEL * (1.5 - progress * 0.8); // 1.5 down to 0.7
+            }
+            
+            // Stage 4: Approaching max speed (1.5 to 2.0) - Very slow acceleration
+            const remainingRoom = 1 - normalizedSpeed;
+            return BASE_ACCEL * 0.3 * remainingRoom; // Exponential drop-off
+        }
+        
+        function calculateDrag(currentSpeed) {
+            // Air resistance increases quadratically with speed
+            const speedFactor = (currentSpeed / MAX_SPEED) ** 2;
+            const baseDrag = 0.005; // Minimum drag - reduced for better coasting
+            const speedDrag = speedFactor * 0.001; // Additional drag from speed
+            return baseDrag + speedDrag;
+        }
+
         init();
         connectWebSocket();
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(COLORS.sky);
-            scene.fog = new THREE.FogExp2(COLORS.sky, 0.002);
+            scene.background = new THREE.Color(0xb4cde5);
+            scene.fog = new THREE.FogExp2(0xb4cde5, fogDensity);
+            skyColor = scene.background.clone();
+            skyTargetColor = new THREE.Color(COLORS.sky);
+            chooseNextFogTarget();
+            chooseNextSkyTarget();
 
             camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 1.2, 0);
@@ -477,7 +652,7 @@
             for (let i = 0; i < TREES_PER_SEGMENT; i++) {
                 // Random position relative to road
                 const side = Math.random() > 0.5 ? 1 : -1;
-                const distance = ROAD_WIDTH / 2 + Math.random() * 40; // Don't spawn on road
+                const distance = ROAD_WIDTH + Math.random() * 40; // Don't spawn on road
                 const zPos = -currentZ - (Math.random() * SEGMENT_LENGTH);
                 const xPos = getRoadX(-zPos) + (side * distance);
 
@@ -505,14 +680,40 @@
         function updatePhysics() {
             const forwardInput = keys.w || keys.arrowup || controllerGas;
             const backInput = keys.s || keys.arrowdown || controllerBrake;
+            const throttle = forwardInput && !isCrashed;
+            const speedClassEl = document.getElementById('speed-class');
 
-            if (forwardInput && !isCrashed) {
-                speed += ACCEL;
+            if (throttle) {
+                // Apply stage-based acceleration
+                speed += calculateAcceleration(speed, true);
+                
+                // Determine speed stage for display
+                if (speedClassEl) {
+                    if (speed < INITIAL_DRAG_THRESHOLD) {
+                        speedClassEl.textContent = 'D'; // Drag
+                    } else if (speed < MID_RANGE_SPEED) {
+                        speedClassEl.textContent = '1'; // Stage 1
+                    } else if (speed < HIGH_SPEED_THRESHOLD) {
+                        speedClassEl.textContent = '2'; // Stage 2
+                    } else {
+                        speedClassEl.textContent = '3'; // Stage 3
+                    }
+                }
             } else if (backInput) {
-                speed -= ACCEL;
+                // Braking: faster deceleration
+                if (speed * 100 > 2)
+                    speed -= speed * 0.1;   // jerky braking
+                else
+                    speed -= 0.001;    // reverse acceleration
+                speed = Math.max(speed, -0.5); // Limit reverse speed
+                if (speedClassEl) speedClassEl.textContent = 'B'; // Braking
             } else {
-                speed *= FRICTION;
+                // Coasting: apply drag
+                const drag = calculateDrag(speed);
+                speed *= (1 - drag);
             }
+            
+            // Clamp speed
             speed = Math.max(Math.min(speed, MAX_SPEED), -MAX_SPEED);
 
             if (Math.abs(speed) > 0.01) {
@@ -522,7 +723,7 @@
                 const steerDir = isPhoneConnected
                     ? controllerSteerNormalized
                     : steerLeft ? 1 : steerRight ? -1 : 0;
-                document.getElementById('speed-ui').textContent = speed.toFixed(2); 
+                document.getElementById('speed-ui').textContent = (speed * 100).toFixed(0); 
                 carAngle += steerDir * STEER_SPEED * (speed / MAX_SPEED);
             }
 
@@ -543,12 +744,19 @@
             }
 
             if (distEl) {
-                distEl.textContent = `${Math.floor(Math.abs(car.position.z))}`;
+                const value = Math.floor(Math.abs(car.position.z))/10;
+                distEl.textContent = value.toFixed(0);
             }
         }
 
         function animate() {
+            const now = performance.now();
+            const delta = now - lastFrameTime;
+            lastFrameTime = now;
+
             requestAnimationFrame(animate);
+            updateSky(delta);
+            updateFog(delta);
             updatePhysics();
 
             // --- CAMERA: Elastic Cinematic Follow ---
