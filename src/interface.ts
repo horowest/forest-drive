@@ -8,11 +8,25 @@ let roomId = '';
 let serverLanIp = 'localhost';
 let isPhoneConnected = false;
 let lastPingTime = 0;
+let controllerGas = false;
+let audioUnlocked = false;
+let engineLoopPlaying = false;
+let skidLoopPlaying = false;
+let roadLoopPlaying = false;
 const latencyHistory: number[] = [];
 
 // Instantiate 2D Arcade Game
 const gameCanvas = document.getElementById('game-canvas') as HTMLCanvasElement;
 const game = new DrivingGame(gameCanvas);
+
+// Audio Assets (real sound files should live in public/sounds/)
+const engineAudio = createLoopingAudio('/sounds/engine-loop.mp3', 0.24);
+const skidAudio = createLoopingAudio('/sounds/skid-loop.mp3', 0.28);
+const roadAudio = createLoopingAudio('/sounds/road-loop.mp3', 0.10);
+const crashAudio = new Audio('/sounds/crash.wav');
+crashAudio.preload = 'auto';
+crashAudio.volume = 0.85;
+crashAudio.crossOrigin = 'anonymous';
 
 // DOM Elements
 const statusDot = document.getElementById('status-dot') as HTMLSpanElement;
@@ -213,6 +227,7 @@ function handleMotionInput(data: any) {
   const steer = data.steeringAngle || 0; // -90 to +90
   const gas = data.gas || false;
   const brake = data.brake || false;
+  controllerGas = gas;
   const raw = data.raw || { alpha: 0, beta: 0, gamma: 0, ax: 0, ay: 0, az: 0 };
   
   // 1. Pass inputs to active Driving Simulator
@@ -333,11 +348,109 @@ function triggerCalibrationAlert() {
   }, 1200);
 }
 
+function createLoopingAudio(path: string, volume: number): HTMLAudioElement {
+  const audio = new Audio(path);
+  audio.loop = true;
+  audio.preload = 'auto';
+  audio.volume = Math.min(1, Math.max(0, volume));
+  audio.muted = false;
+  audio.crossOrigin = 'anonymous';
+  return audio;
+}
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  console.log('[Audio] Audio unlocked by user gesture');
+}
+
+window.addEventListener('click', unlockAudio, { once: true });
+window.addEventListener('keydown', unlockAudio, { once: true });
+
+function startEngineLoop() {
+  if (!audioUnlocked || engineLoopPlaying) return;
+  engineAudio.play().catch(() => {});
+  engineLoopPlaying = true;
+}
+
+function stopEngineLoop() {
+  if (!engineLoopPlaying) return;
+  engineAudio.pause();
+  engineLoopPlaying = false;
+}
+
+function startSkidLoop() {
+  if (!audioUnlocked || skidLoopPlaying) return;
+  skidAudio.play().catch(() => {});
+  skidLoopPlaying = true;
+}
+
+function stopSkidLoop() {
+  if (!skidLoopPlaying) return;
+  skidAudio.pause();
+  skidAudio.currentTime = 0;
+  skidLoopPlaying = false;
+}
+
+function startRoadLoop() {
+  if (!audioUnlocked || roadLoopPlaying) return;
+  roadAudio.play().catch(() => {});
+  roadLoopPlaying = true;
+}
+
+function stopRoadLoop() {
+  if (!roadLoopPlaying) return;
+  roadAudio.pause();
+  roadAudio.currentTime = 0;
+  roadLoopPlaying = false;
+}
+
+function pauseAllGameAudio() {
+  stopEngineLoop();
+  stopSkidLoop();
+  stopRoadLoop();
+}
+
+function playCrashSound() {
+  if (!audioUnlocked) return;
+  crashAudio.currentTime = 0;
+  crashAudio.play().catch(() => {});
+}
+
+function updateAudioState() {
+  if (!audioUnlocked) return;
+
+  if (!game.isRunning) {
+    pauseAllGameAudio();
+    return;
+  }
+
+  startEngineLoop();
+
+  const speedNorm = Math.min(1, game.currentSpeed / 4);
+  engineAudio.playbackRate = 0.7 + speedNorm * 0.9;
+  engineAudio.volume = Math.min(1, 0.15 + speedNorm * 0.4 + (controllerGas ? 0.12 : 0));
+
+  if (game.isDriftingState) {
+    startSkidLoop();
+  } else {
+    stopSkidLoop();
+  }
+
+  if (game.isOffRoadState) {
+    startRoadLoop();
+    roadAudio.volume = 0.06;
+  } else {
+    stopRoadLoop();
+  }
+}
+
 // Game Loop Binding (60FPS requestAnimationFrame)
 function gameLoop() {
   if (game.isRunning) {
     game.tick();
     game.draw();
+    updateAudioState();
     
     // Bind game physics to DOM HUD
     hudSpeed.textContent = `${game.getSpeedMPH()} MPH`;
@@ -350,6 +463,8 @@ function gameLoop() {
     const min = String(Math.floor(totalCenti / 6000)).padStart(2, '0');
     
     hudTime.textContent = `${min}:${sec}:${centi}`;
+  } else {
+    updateAudioState();
   }
   
   requestAnimationFrame(gameLoop);
@@ -358,6 +473,8 @@ function gameLoop() {
 // Game Over handler
 game.onGameOver(() => {
   console.log('[Game] Player crashed!');
+  playCrashSound();
+  pauseAllGameAudio();
   finalScoreEl.textContent = String(game.score);
   
   // Transition overlays

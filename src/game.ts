@@ -44,6 +44,7 @@ export class DrivingGame {
   private carBrake = 0.2;
   private carFriction = 0.04;
   private carDrifting = false;
+  private offRoad = false;
   
   // Input states
   private steerInput = 0; // -90 to +90 degrees
@@ -131,6 +132,18 @@ export class DrivingGame {
     this.brakeInput = brake;
   }
 
+  public get isDriftingState(): boolean {
+    return this.carDrifting;
+  }
+
+  public get isOffRoadState(): boolean {
+    return this.offRoad;
+  }
+
+  public get currentSpeed(): number {
+    return Math.abs(this.carSpeed);
+  }
+
   public onGameOver(callback: () => void) {
     this.onGameOverCallback = callback;
   }
@@ -187,6 +200,7 @@ export class DrivingGame {
     // 2. Telemetry and track parameters
     const { dist: offCenterDist } = this.getDistanceToTrackCenter();
     const isOffRoad = offCenterDist > this.trackWidth / 2;
+    this.offRoad = isOffRoad;
 
     // Off-road reduces max speed & generates drift/resistance
     const maxSpeedLimit = isOffRoad ? this.carMaxSpeed * 0.4 : this.carMaxSpeed;

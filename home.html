@@ -233,12 +233,11 @@
             0xd19a8a, // Default warm sky
             0x537691, // Twilight
             0x1d3f58, // Deep dusk
-            0xb4cde5, // Soft overcast - morning
-            0x7ec0ee  // Clear day - afternoon
+            // 0x7ec0ee  // Clear day - afternoon
         ];
         let skyColorPicker = 0;
-        const SKY_CHANGE_INTERVAL = 60000; // 1 minute
-        const SKY_CHANGE_INTERVAL_SUB = 60000; // 1 minute
+        const SKY_HOLD_DURATION = 60000; // 60 seconds each static color
+        const SKY_TRANSITION_DURATION = 30000; // 30 seconds blend time
 
         let scene;
         let camera;
@@ -255,9 +254,8 @@
         let fogTransitionTime = 7000;
         let skyColor;
         let skyTargetColor;
-        let skyTimer = 0;
-        let skyTransitionTime = 7000;
-        let skyChangeInterval = getRandomSkyInterval();
+        let skyPhase = 'hold';
+        let skyPhaseTimer = 0;
         let skyTargetIsSunset = false;
         let lastFrameTime = performance.now();
         let fogChangeInterval = getRandomFogInterval();
@@ -419,14 +417,19 @@
         }
 
         function chooseNextFogTarget() {
-            fogTarget = Math.random() < 0.5 ? 0.002 : 0.022;
-            fogTransitionTime = 10000 + Math.random() * 5000; // 10-15 seconds blend
-            fogChangeInterval = getRandomFogInterval();
-            fogTimer = 0;
-        }
+            const denseFog = Math.random() < 0.18; // Rare dense fog
 
-        function getRandomSkyInterval() {
-            return SKY_CHANGE_INTERVAL + Math.random() * SKY_CHANGE_INTERVAL_SUB; // 1-2 minutes
+            if (denseFog) {
+                fogTarget = 0.022;
+                fogTransitionTime = 10000 + Math.random() * 1800; // Quick dense fog buildup
+                fogChangeInterval = 4000 + Math.random() * 4000; // Short dense fog duration
+            } else {
+                fogTarget = 0.001 + Math.random() * 0.0015; // Light fog baseline
+                fogTransitionTime = 8000 + Math.random() * 5000; // Gentle light fog shift
+                fogChangeInterval = 25000 + Math.random() * 25000; // Long light fog duration
+            }
+
+            fogTimer = 0;
         }
 
         function chooseNextSkyTarget() {
@@ -434,19 +437,29 @@
             skyColorPicker = (skyColorPicker + 1) % SKY_COLORS.length;
 
             skyTargetColor.set(nextColor);
-            skyTransitionTime = 10000 + Math.random() * 10000; // 10-20 seconds blend
-            skyChangeInterval = getRandomSkyInterval();
-            skyTimer = 0;
+            skyPhase = 'transition';
+            skyPhaseTimer = 0;
         }
 
         function updateSky(delta) {
             if (!scene || !scene.background) return;
-            skyTimer += delta;
-            if (skyTimer >= skyChangeInterval) {
-                chooseNextSkyTarget();
+            skyPhaseTimer += delta;
+
+            if (skyPhase === 'hold') {
+                if (skyPhaseTimer >= SKY_HOLD_DURATION) {
+                    chooseNextSkyTarget();
+                }
+            } else {
+                const step = Math.min(1, delta / SKY_TRANSITION_DURATION);
+                skyColor.lerp(skyTargetColor, step);
+
+                if (skyPhaseTimer >= SKY_TRANSITION_DURATION) {
+                    skyPhase = 'hold';
+                    skyPhaseTimer = 0;
+                    skyColor.copy(skyTargetColor);
+                }
             }
-            const step = Math.min(1, delta / skyTransitionTime);
-            skyColor.lerp(skyTargetColor, step);
+
             if (scene.background.isColor) {
                 scene.background.copy(skyColor);
             }
@@ -509,12 +522,13 @@
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0xb4cde5);
-            scene.fog = new THREE.FogExp2(0xb4cde5, fogDensity);
+            const color = SKY_COLORS[0];
+            scene.background = new THREE.Color(color);
+            scene.fog = new THREE.FogExp2(color, fogDensity);
             skyColor = scene.background.clone();
-            skyTargetColor = new THREE.Color(COLORS.sky);
-            chooseNextFogTarget();
-            chooseNextSkyTarget();
+            skyTargetColor = scene.background.clone();
+            skyPhase = 'hold';
+            skyPhaseTimer = 0;
 
             camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 1.2, 0);
@@ -761,14 +775,14 @@
 
             // --- CAMERA: Elastic Cinematic Follow ---
             // Camera chases a point behind the car
-            const camDist = 10;
+            const camDist = 8;
             const camHeight = 2;
             const camTargetZ = car.position.z + camDist * Math.cos(carAngle);
             const camTargetX = car.position.x + camDist * Math.sin(carAngle);
             
             // Smooth lerp (0.1) creates the "lag" effect
             camera.position.x += (camTargetX - camera.position.x) * 0.2;
-            camera.position.z += (camTargetZ - camera.position.z) * 0.1;
+            camera.position.z += (camTargetZ - camera.position.z) * 0.2;
             camera.position.y = camHeight;
 
             // Camera looks at a point far ahead of the car
