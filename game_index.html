@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Silent Forest - Final Environment</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #d19a8a; }
+        #ui { position: absolute; top: 40px; width: 100%; text-align: center; color: #2a1a1a; pointer-events: none; z-index: 10; }
+        h1 { font-family: sans-serif; font-weight: 200; letter-spacing: 12px; text-transform: uppercase; font-size: 16px; opacity: 0.5; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <div id="ui"><h1>The Silent Forest</h1></div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+
+    const SETTINGS = {
+        peach: 0xd19a8a,
+        richBrown: 0x2b1d14, // Rich Dark Brown
+        roadColor: 0x080808,
+        treeCount: 450,
+        worldDepth: 600,
+        roadWidth: 16 
+    };
+
+    let scene, camera, renderer, treeMat;
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(SETTINGS.peach);
+        scene.fog = new THREE.FogExp2(SETTINGS.peach, 0.007);
+
+        camera = new THREE.PerspectiveCamera(24, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2.5, 35);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        document.body.appendChild(renderer.domElement);
+
+        // Stronger light from above to catch the brown of the ground
+        const hemi = new THREE.HemisphereLight(SETTINGS.peach, 0x1a0f0a, 2.5);
+        scene.add(hemi);
+
+        buildWorld();
+        animate();
+    }
+
+    function getTerrainHeight(x, z) {
+        if (Math.abs(x) < SETTINGS.roadWidth / 2 + 2) return -1.2;
+        const noise = Math.sin(x * 0.4) * Math.cos(z * 0.4) * 0.8;
+        const banks = Math.pow(Math.abs(x) * 0.07, 2.2); 
+        return noise + banks - 1.2;
+    }
+
+    function generateTreeTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 1024;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 512, 1024);
+
+        // 1. SHORTER BARE TRUNK (Only bottom ~15%)
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(248, 850, 16, 174); 
+
+        // 2. TALL CANOPY (Top 85%)
+        // We draw from top down to create better layering
+        for (let i = 0; i < 400; i++) {
+            const y = (i / 400) * 850; 
+            const width = (i / 400) * 190 + 15; 
+            ctx.strokeStyle = '#080a08';
+            ctx.lineWidth = 2 + Math.random() * 4;
+            
+            ctx.beginPath();
+            ctx.moveTo(256, y);
+            ctx.lineTo(256 - width, y + 35 + Math.random() * 25);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(256, y);
+            ctx.lineTo(256 + width, y + 35 + Math.random() * 25);
+            ctx.stroke();
+        }
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    function buildWorld() {
+        // --- THE LAND (Rich Dark Brown & Rough) ---
+        const groundGeo = new THREE.PlaneGeometry(200, SETTINGS.worldDepth, 120, 120);
+        const pos = groundGeo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i);
+            const z = pos.getZ(i);
+            pos.setY(i, getTerrainHeight(x, z));
+        }
+        groundGeo.computeVertexNormals();
+        
+        const groundMat = new THREE.MeshStandardMaterial({ 
+            color: SETTINGS.richBrown,
+            roughness: 0.9,
+            metalness: 0
+        });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        scene.add(ground);
+
+        // --- THE ROAD ---
+        const road = new THREE.Mesh(
+            new THREE.PlaneGeometry(SETTINGS.roadWidth, SETTINGS.worldDepth),
+            new THREE.MeshBasicMaterial({ color: SETTINGS.roadColor })
+        );
+        road.rotation.x = -Math.PI / 2;
+        road.position.y = -1.19;
+        scene.add(road);
+
+        // Yellow Lines
+        const lineGeo = new THREE.PlaneGeometry(0.15, SETTINGS.worldDepth);
+        const lineMat = new THREE.MeshBasicMaterial({ color: 0xecaa00 });
+        const l1 = new THREE.Mesh(lineGeo, lineMat);
+        l1.rotation.x = -Math.PI / 2;
+        l1.position.set(-0.25, -1.18, 0);
+        scene.add(l1);
+        const l2 = l1.clone(); l2.position.x = 0.25; scene.add(l2);
+
+        // --- THE TREES (Tall with Short Trunks) ---
+        treeMat = new THREE.MeshBasicMaterial({ 
+            map: generateTreeTexture(), 
+            transparent: true, 
+            alphaTest: 0.65, 
+            side: THREE.DoubleSide,
+            depthWrite: true 
+        });
+
+        const instancedTrees = new THREE.InstancedMesh(new THREE.PlaneGeometry(18, 55), treeMat, SETTINGS.treeCount * 3);
+        const dummy = new THREE.Object3D();
+
+        for (let i = 0; i < SETTINGS.treeCount; i++) {
+            const side = Math.random() > 0.5 ? 1 : -1;
+            const x = (Math.random() * 70 + (SETTINGS.roadWidth/2 + 5)) * side;
+            const z = Math.random() * -SETTINGS.worldDepth;
+            const scale = 0.7 + Math.random() * 1.6;
+
+            const groundY = getTerrainHeight(x, z);
+
+            for (let j = 0; j < 3; j++) {
+                // Grounding logic
+                dummy.position.set(x, groundY + (27.5 * scale) - 2.0, z);
+                dummy.rotation.y = (Math.PI / 3) * j;
+                dummy.scale.setScalar(scale);
+                dummy.updateMatrix();
+                instancedTrees.setMatrixAt(i * 3 + j, dummy.matrix);
+            }
+        }
+        scene.add(instancedTrees);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    init();
+</script>
+</body>
+</html>

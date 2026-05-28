@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VeloDrive Dashboard - Realtime Steering POC</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <script type="module" crossorigin src="/assets/main-BgLdaNSj.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
+  <link rel="stylesheet" crossorigin href="/assets/style-CX_8se2z.css">
+</head>
+<body class="desktop-body">
+  <div class="glow-bg"></div>
+  
+  <header class="app-header">
+    <div class="logo">
+      <span class="neon-text-blue">VELO</span><span class="neon-text-pink">DRIVE</span>
+      <span class="badge">Telemetry POC</span>
+    </div>
+    <div class="connection-status-bar" id="connection-bar">
+      <span class="status-dot disconnected" id="status-dot"></span>
+      <span class="status-text" id="status-text">WAITING FOR CONTROLLER</span>
+    </div>
+  </header>
+
+  <main class="dashboard-grid">
+    <!-- TELEMETRY & CONTROLS PANEL -->
+    <section class="panel glass-card telemetry-panel">
+      <h2 class="panel-title"><span class="icon">📊</span> Telemetry Live Data</h2>
+      
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Steering Angle</div>
+          <div class="metric-value Share-Tech" id="val-steering">0.0°</div>
+          <div class="metric-bar-container">
+            <div class="metric-bar-fill fill-pink" id="bar-steering" style="width: 50%; transform: translateX(0%);"></div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">Pedal Inputs</div>
+          <div class="pedal-indicators">
+            <div class="pedal-indicator brake-pedal" id="pedal-brake">
+              <span>BRAKE</span>
+              <div class="pedal-fill" id="fill-brake"></div>
+            </div>
+            <div class="pedal-indicator gas-pedal" id="pedal-gas">
+              <span>GAS</span>
+              <div class="pedal-fill" id="fill-gas"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="angles-table-container">
+        <table class="angles-table">
+          <thead>
+            <tr>
+              <th>Axis / Sensor</th>
+              <th>Current Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Phone Rotation (Y-axis / Tilt)</td>
+              <td class="Share-Tech font-glow-blue" id="val-gamma">0.0°</td>
+            </tr>
+            <tr>
+              <td>Phone Yaw (Z-axis)</td>
+              <td class="Share-Tech" id="val-alpha">0.0°</td>
+            </tr>
+            <tr>
+              <td>Phone Pitch (X-axis)</td>
+              <td class="Share-Tech" id="val-beta">0.0°</td>
+            </tr>
+            <tr>
+              <td>Accel Including Gravity (X, Y, Z)</td>
+              <td class="Share-Tech" id="val-acc">0.00, 0.00, 0.00</td>
+            </tr>
+            <tr>
+              <td>Rotation Rates (α, β, γ)</td>
+              <td class="Share-Tech" id="val-rot">0, 0, 0</td>
+            </tr>
+            <tr>
+              <td>Mobile Secure Context?</td>
+              <td class="Share-Tech" id="val-mobile-secure">--</td>
+            </tr>
+            <tr>
+              <td>Active Mobile Sensor API</td>
+              <td class="Share-Tech font-glow-pink" id="val-mobile-api">PENDING...</td>
+            </tr>
+            <tr>
+              <td>Total Telemetry Packets</td>
+              <td class="Share-Tech font-glow-green" id="val-packets">0</td>
+            </tr>
+            <tr>
+              <td>Ping Latency</td>
+              <td class="Share-Tech font-glow-green" id="val-latency">-- ms</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="latency-graph-container">
+        <div class="graph-header">
+          <span>Local WS Latency</span>
+          <span class="latency-label green" id="latency-val">0ms</span>
+        </div>
+        <div class="latency-sparkline" id="latency-sparkline">
+          <!-- Bars generated via TS -->
+        </div>
+      </div>
+
+      <div class="game-instructions glass-card">
+        <h3>How to Play:</h3>
+        <ul>
+          <li>Tilt your phone left and right like a steering wheel to turn the car.</li>
+          <li>Hold the <strong>GAS</strong> pedal on your phone to accelerate.</li>
+          <li>Hold the <strong>BRAKE</strong> pedal on your phone to decelerate or reverse.</li>
+          <li>Press <strong>CALIBRATE</strong> on the phone while holding it level to re-center.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- STEERING WHEEL VIEWPORT & QR CODE -->
+    <section class="panel glass-card wheel-panel">
+      <div class="pairing-container" id="pairing-section">
+        <h2 class="panel-title neon-text-blue">Scan to Connect Phone</h2>
+        <p class="pairing-desc">Scan this QR code with your phone to use it as a wireless steering wheel controller. Ensure your phone is connected to the same Wi-Fi network!</p>
+        
+        <div class="qr-wrapper glass-card">
+          <canvas id="qr-canvas"></canvas>
+          <div class="qr-spinner" id="qr-loader"></div>
+        </div>
+
+        <div class="room-code-display">
+          <span>Room Code:</span>
+          <strong id="room-code" class="Share-Tech">------</strong>
+        </div>
+      </div>
+
+      <div class="virtual-wheel-container" id="wheel-section" style="display: none;">
+        <h2 class="panel-title"><span class="icon">🎡</span> Virtual Wheel</h2>
+        
+        <div class="wheel-wrapper">
+          <!-- Highly polished glowing SVG Steering Wheel -->
+          <svg class="steering-wheel" id="svg-wheel" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="wheel-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#1e293b" />
+                <stop offset="50%" stop-color="#0f172a" />
+                <stop offset="100%" stop-color="#1e293b" />
+              </linearGradient>
+              <linearGradient id="glow-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#06b6d4" />
+                <stop offset="100%" stop-color="#ec4899" />
+              </linearGradient>
+              <filter id="neon-glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            <!-- Outer rim -->
+            <circle cx="100" cy="100" r="85" fill="none" stroke="url(#wheel-gradient)" stroke-width="16" />
+            <circle cx="100" cy="100" r="91" fill="none" stroke="rgba(255, 255, 255, 0.05)" stroke-width="1" />
+            
+            <!-- Glowing accent indicators -->
+            <path d="M 100 15 A 85 85 0 0 1 185 100" fill="none" stroke="rgba(6, 182, 212, 0.3)" stroke-width="4" />
+            <path d="M 100 15 A 85 85 0 0 0 15 100" fill="none" stroke="rgba(236, 72, 153, 0.3)" stroke-width="4" />
+            
+            <!-- Top Center Marker -->
+            <rect x="96" y="7" width="8" height="12" rx="2" fill="#ec4899" filter="url(#neon-glow)" />
+
+            <!-- Grips -->
+            <path d="M 15 100 A 85 85 0 0 1 35 55" fill="none" stroke="#334155" stroke-width="18" stroke-linecap="round" />
+            <path d="M 185 100 A 85 85 0 0 0 165 55" fill="none" stroke="#334155" stroke-width="18" stroke-linecap="round" />
+
+            <!-- Spokes -->
+            <!-- Left Spoke -->
+            <path d="M 30 100 L 80 100 L 85 115 L 32 110 Z" fill="#1e293b" stroke="#334155" stroke-width="2" />
+            <!-- Right Spoke -->
+            <path d="M 170 100 L 120 100 L 115 115 L 168 110 Z" fill="#1e293b" stroke="#334155" stroke-width="2" />
+            <!-- Bottom Spoke -->
+            <path d="M 100 180 L 100 120 L 90 120 L 88 110 L 112 110 L 110 120 Z" fill="#1e293b" stroke="#334155" stroke-width="2" />
+            
+            <!-- Metallic center cap -->
+            <circle cx="100" cy="100" r="28" fill="#0f172a" stroke="#475569" stroke-width="3" />
+            <circle cx="100" cy="100" r="14" fill="#1e293b" stroke="url(#glow-grad)" stroke-width="2" filter="url(#neon-glow)" />
+            
+            <!-- Mini buttons on spokes -->
+            <circle cx="55" cy="104" r="3" fill="#ec4899" />
+            <circle cx="145" cy="104" r="3" fill="#06b6d4" />
+          </svg>
+        </div>
+
+        <div class="recalibration-alert" id="calibration-alert">
+          CALIBRATED
+        </div>
+      </div>
+    </section>
+
+    <!-- 2D PLAYABLE DRIVING GAME -->
+    <section class="panel glass-card game-panel">
+      <div class="panel-header-flex">
+        <h2 class="panel-title"><span class="icon">🏎️</span> Virtual Driving Simulator</h2>
+        <div class="game-hud">
+          <div class="hud-item"><span class="hud-label">SPEED:</span> <span class="hud-value Share-Tech neon-text-blue" id="hud-speed">0 MPH</span></div>
+          <div class="hud-item"><span class="hud-label">SCORE:</span> <span class="hud-value Share-Tech" id="hud-score">00000</span></div>
+          <div class="hud-item"><span class="hud-label">LAP TIME:</span> <span class="hud-value Share-Tech font-glow-pink" id="hud-time">00:00:00</span></div>
+        </div>
+      </div>
+
+      <div class="canvas-wrapper">
+        <canvas id="game-canvas" width="640" height="400"></canvas>
+        
+        <!-- Game Screens Overlay -->
+        <div class="game-overlay" id="game-overlay">
+          <div class="overlay-content start-content">
+            <h1 class="neon-text-blue">VELOCITY OVERDRIVE</h1>
+            <p>Connect your mobile steering wheel to start driving!</p>
+            <div class="connection-tip animate-pulse">Waiting for phone sensors...</div>
+          </div>
+          
+          <div class="overlay-content gameover-content" style="display: none;">
+            <h1 class="neon-text-pink">CRASHED!</h1>
+            <p>You went off-track too hard. Your wheels blew out!</p>
+            <div class="score-summary">Score: <span id="final-score" class="Share-Tech">0</span></div>
+            <button class="btn btn-neon-blue" id="btn-restart-game">RESTART DRIVING</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>Built with Vite + TypeScript + WebSockets. Responsive 60FPS dashboard telemetry POC.</p>
+  </footer>
+
+</body>
+</html>

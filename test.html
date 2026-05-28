@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Phone Motion Capture</title>
+</head>
+<body>
+    <button onclick="requestSensors()">Start Motion Capture</button>
+    <p>Acceleration: <span id="accel">No data</span></p>
+    <p>Rotation: <span id="rotation">No data</span></p>
+
+    <div id="log"></div>
+
+    <script>
+        log = document.getElementById('log');
+
+        log.innerHTML += `<p>Requesting permission for motion sensors...</p>`;
+
+        if (window.DeviceOrientationEvent || window.DeviceMotionEvent) {
+            log.innerHTML += `<p>Registering for motion sensors...</p>`;
+            window.addEventListener(
+                "deviceorientation",
+                (event) => {
+                    log.innerHTML += `<p>motion active...</p>`;
+                    const rotateDegrees = event.alpha; // alpha: rotation around z-axis
+                    const leftToRight = event.gamma; // gamma: left to right
+                    const frontToBack = event.beta; // beta: front back motion
+
+                    handleOrientationEvent(frontToBack, leftToRight, rotateDegrees);
+                },
+                true,
+            );
+        } else {
+            log.innerHTML += `<p>DeviceOrientationEvent is not supported on this device.</p>`;
+        }
+
+        function handleOrientationEvent(frontToBack, leftToRight, rotateDegrees) {
+            // Rotation (Alpha, Beta, Gamma)
+            document.getElementById('rotation').innerText = `frontToBack: ${frontToBack}, Beta: ${leftToRight}, Gamma: ${rotateDegrees}`;
+        }
+
+    </script>
+</body>
+</html>

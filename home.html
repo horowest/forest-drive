@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Silent Forest - Step 3</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #d19a8a; }
+        canvas { display: block; }
+        #ui {
+            position: absolute; top: 30px; left: 30px; color: #ffffff;
+            pointer-events: none; text-transform: uppercase; letter-spacing: 3px;
+            font-weight: bold; text-shadow: 0px 0px 10px rgba(209, 154, 138, 0.5);
+        }
+        #crash-msg {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #702020; font-size: 20px; display: none; font-weight: bold;
+            background: rgba(209, 154, 138, 0.8); padding: 20px; border-radius: 5px;
+        }
+        .controls { position: absolute; bottom: 20px; left: 30px; color: #ffffff; font-size: 12px; opacity: 0.6; }
+        #status-bar {
+            position: absolute;
+            top: 23px;
+            left: 40%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: 24px;
+            background: rgba(15, 23, 42, 0.85);
+            color: #f8fafc;
+            font-size: 13px;
+            z-index: 10;
+            box-shadow: 0 20px 80px rgba(0, 0, 0, 0.25);
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ef4444;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+        }
+        .connected { background: #22c55e; box-shadow: 0 0 10px rgba(34, 197, 94, 0.6); }
+        #pairing-panel {
+            position: absolute;
+            top: 18px;
+            right: 18px;
+            width: 240px;
+            padding: 18px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.12);
+            border-radius: 24px;
+            color: #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            z-index: 10;
+            box-shadow: 0 20px 80px rgba(0, 0, 0, 0.25);
+        }
+        #pairing-panel p {
+            margin: 0;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        #qr-canvas {
+            width: 100%;
+            height: auto;
+            border-radius: 18px;
+            background: #ffffff;
+        }
+        .room-code {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            letter-spacing: 0.08em;
+        }
+        .room-code strong {
+            color: #7dd3fc;
+            letter-spacing: 0.1em;
+        }
+        #qr-loader {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+        #calibration-alert {
+            position: absolute;
+            bottom: 90px;
+            right: 18px;
+            padding: 12px 16px;
+            border-radius: 18px;
+            background: rgba(14, 165, 233, 0.9);
+            color: #f8fafc;
+            font-size: 13px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease;
+            z-index: 10;
+        }
+        #calibration-alert.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <div id="status-bar">
+        <span class="status-dot disconnected" id="status-dot"></span>
+        <span id="status-text">WAITING FOR PHONE CONTROLLER</span>
+    </div>
+    <div id="pairing-panel">
+        <p>Scan this QR code with your phone to use it as a wireless steering controller.</p>
+        <canvas id="qr-canvas" width="200" height="200"></canvas>
+        <div class="room-code"><span>ROOM</span> <strong id="room-code">------</strong></div>
+        <div id="qr-loader">Generating pairing QR…</div>
+    </div>
+    <div id="ui">Distance: <span id="dist">0</span>m | Speed: <span id="speed-ui">0</span> | Steering: <span id="steer">0</span></div>
+    <div id="crash-msg">OFF ROAD - STEER BACK TO ASPHALT</div>
+    <div class="controls">WASD / ARROWS TO DRIVE</div>
+    <div id="calibration-alert">CALIBRATED</div>
+
+    <script type="module">
+        import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+        import QRCode from 'qrcode';
+
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const pairingPanel = document.getElementById('pairing-panel');
+        const qrCanvas = document.getElementById('qr-canvas');
+        const qrLoader = document.getElementById('qr-loader');
+        const roomCodeEl = document.getElementById('room-code');
+        const calibrationAlert = document.getElementById('calibration-alert');
+        const distEl = document.getElementById('dist');
+        const crashMsg = document.getElementById('crash-msg');
+
+        let socket = null;
+        let roomId = '';
+        let serverLanIp = 'localhost';
+        let isPhoneConnected = false;
+        let lastPingTime = 0;
+        let latencyInterval = null;
+
+        let controllerSteer = 0;
+        let controllerGas = false;
+        let controllerBrake = false;
+
+        // --- 1. CONFIGURATION ---
+        const COLORS = {
+            sky: 0xd19a8a,
+            ground: 0x752121,
+            road: 0x1a1a1a,
+            yellow: 0xf2a900,
+            white: 0xcccccc,
+            tree: 0xffffff, // 0x050805,
+            car: 0xaaafaa
+        };
+        
+        const ROAD_WIDTH = 15;
+        const SEGMENT_LENGTH = 40;
+        const SEGMENT_RES = 40;
+        const VISIBLE_SEGMENTS = 15;
+        const CURVE_AMPLITUDE = 15;
+        const TREES_PER_SEGMENT = 10; // Density
+        const SEG_LEN = 40;
+        const VISIBLE_SEGS = 15;
+        const CURVE_AMP = 20;
+        const CURVE_FREQ = 0.012;
+        const STRAIGHT_LIMIT = 80;
+        const CURVE_TRANSITION = 60;
+
+        // Physics
+        const ACCEL = 0.005;
+        const FRICTION = 0.98;
+        const STEER_SPEED = 0.04;
+        const MAX_SPEED = 1.2;
+
+        let scene;
+        let camera;
+        let renderer;
+        let roadTexture;
+        let treeMaterial;
+        let car;
+        let ground;
+        let roadSegments = [];
+        let currentZ = 0;
+
+        let speed = 0;
+        let carAngle = 0;
+        let isCrashed = false;
+        const keys = { w: false, s: false, a: false, d: false, arrowup: false, arrowdown: false, arrowleft: false, arrowright: false };
+
+        function generateRoomId() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let result = '';
+            for (let i = 0; i < 4; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = () => {
+                roomId = generateRoomId();
+                if (roomCodeEl) roomCodeEl.textContent = roomId;
+                if (socket) socket.send(JSON.stringify({ type: 'join', room: roomId, role: 'interface' }));
+            };
+
+            socket.onmessage = ({ data }) => {
+                try {
+                    const parsed = JSON.parse(data.toString());
+
+                    switch (parsed.type) {
+                        case 'server_ip':
+                            serverLanIp = parsed.ip || serverLanIp;
+                            generatePairingQRCode();
+                            break;
+                        case 'peer_status':
+                            if (parsed.role === 'controller') {
+                                parsed.status === 'connected' ? handlePhoneConnected() : handlePhoneDisconnected();
+                            }
+                            break;
+                        case 'motion':
+                            handleMotionInput(parsed);
+                            break;
+                        case 'calibrate':
+                            triggerCalibrationAlert();
+                            break;
+                        case 'pong':
+                            handlePongReceived();
+                            break;
+                    }
+                } catch (error) {
+                    console.error('[WS] Home parse error', error);
+                }
+            };
+
+            socket.onclose = () => {
+                handlePhoneDisconnected();
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        function generatePairingQRCode() {
+            if (!qrCanvas) return;
+            if (qrLoader) qrLoader.textContent = 'Generating pairing QR…';
+            const port = window.location.port ? `:${window.location.port}` : '';
+            const hostname = (serverLanIp === 'localhost' || serverLanIp === '127.0.0.1') ? window.location.hostname : serverLanIp;
+            const pairingUrl = `${window.location.protocol}//${hostname}${port}/controller.html?room=${roomId}`;
+
+            QRCode.toCanvas(qrCanvas, pairingUrl, {
+                width: 200,
+                margin: 1,
+                color: { dark: '#030712', light: '#ffffff' }
+            }).then(() => {
+                if (qrLoader) qrLoader.style.display = 'none';
+            }).catch((error) => {
+                console.error('[QR] Failed to generate QR code', error);
+                if (qrLoader) qrLoader.textContent = 'QR generation failed';
+            });
+        }
+
+        function handlePhoneConnected() {
+            isPhoneConnected = true;
+            statusDot?.classList.remove('disconnected');
+            statusDot?.classList.add('connected');
+            if (statusText) statusText.textContent = 'PHONE CONTROLLER CONNECTED';
+            if (pairingPanel) pairingPanel.style.display = 'none';
+            showCalibrationMessage('PHONE CONNECTED');
+            startLatencyMonitor();
+        }
+
+        function handlePhoneDisconnected() {
+            isPhoneConnected = false;
+            statusDot?.classList.remove('connected');
+            statusDot?.classList.add('disconnected');
+            if (statusText) statusText.textContent = 'WAITING FOR PHONE CONTROLLER';
+            if (pairingPanel) pairingPanel.style.display = 'flex';
+            controllerSteer = 0;
+            controllerGas = false;
+            controllerBrake = false;
+            showCalibrationMessage('PHONE DISCONNECTED');
+            stopLatencyMonitor();
+        }
+
+        function triggerCalibrationAlert() {
+            showCalibrationMessage('CALIBRATED');
+        }
+
+        function showCalibrationMessage(message) {
+            if (!calibrationAlert) return;
+            calibrationAlert.textContent = message;
+            calibrationAlert.classList.add('show');
+            setTimeout(() => calibrationAlert.classList.remove('show'), 1200);
+        }
+
+        function handleMotionInput(data) {
+            if (!isPhoneConnected) return;
+            controllerSteer = Number(data.steeringAngle ?? 0);
+            document.getElementById('steer').textContent = (-controllerSteer / 90).toFixed(2);
+            controllerGas = Boolean(data.gas);
+            controllerBrake = Boolean(data.brake);
+        }
+
+        function startLatencyMonitor() {
+            stopLatencyMonitor();
+            latencyInterval = window.setInterval(() => {
+                if (socket && socket.readyState === WebSocket.OPEN && isPhoneConnected) {
+                    lastPingTime = performance.now();
+                    socket.send(JSON.stringify({ type: 'ping' }));
+                }
+            }, 1500);
+        }
+
+        function stopLatencyMonitor() {
+            if (latencyInterval !== null) {
+                window.clearInterval(latencyInterval);
+                latencyInterval = null;
+            }
+        }
+
+        function handlePongReceived() {
+            const latency = Math.round(performance.now() - lastPingTime);
+            console.log(`[WS] Home latency ${latency} ms`);
+        }
+
+        function getRoadX(z) {
+            const absZ = Math.abs(z);
+            let curveStrength = (absZ - STRAIGHT_LIMIT) / CURVE_TRANSITION;
+            curveStrength = Math.max(0, Math.min(1, curveStrength));
+            const easedStrength = curveStrength * curveStrength * (3 - 2 * curveStrength);
+            return Math.sin(z * CURVE_FREQ) * CURVE_AMP * easedStrength;
+        }
+
+        init();
+        connectWebSocket();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(COLORS.sky);
+            scene.fog = new THREE.FogExp2(COLORS.sky, 0.002);
+
+            camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 1.2, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.HemisphereLight(COLORS.sky, COLORS.ground, 0.5));
+
+            roadTexture = createRoadTexture();
+            treeMaterial = createTreeMaterial();
+
+            const groundGeo = new THREE.PlaneGeometry(3000, 3000);
+            const groundMat = new THREE.MeshStandardMaterial({ color: COLORS.ground, roughness: 1 });
+            ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -0.05;
+            scene.add(ground);
+
+            createCar();
+
+            for (let i = 0; i < VISIBLE_SEGS; i++) spawnSegment();
+
+            window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+            window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+            window.addEventListener('resize', onWindowResize);
+
+            animate();
+        }
+
+        function createCar() {
+            const carGroup = new THREE.Group();
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(1.8, 0.6, 4),
+                new THREE.MeshStandardMaterial({ color: COLORS.car })
+            );
+            body.position.y = 0.5;
+            carGroup.add(body);
+
+            const cabin = new THREE.Mesh(
+                new THREE.BoxGeometry(1.4, 0.5, 2),
+                new THREE.MeshStandardMaterial({ color: 0x111111 })
+            );
+            cabin.position.set(0, 1.0, -0.2);
+            carGroup.add(cabin);
+
+            const lightGeo = new THREE.PlaneGeometry(0.5, 0.15);
+            const lightMat = new THREE.MeshBasicMaterial({ color: 0xaa0000 });
+            const leftLight = new THREE.Mesh(lightGeo, lightMat);
+            leftLight.position.set(-0.65, 0.6, 2.01);
+            carGroup.add(leftLight);
+            const rightLight = leftLight.clone();
+            rightLight.position.x = 0.65;
+            carGroup.add(rightLight);
+
+            car = carGroup;
+            scene.add(car);
+        }
+
+        function createTreeMaterial() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('Unable to create tree texture');
+
+            ctx.fillStyle = COLORS.tree;
+            ctx.beginPath();
+            ctx.moveTo(64, 0);
+            ctx.lineTo(100, 256);
+            ctx.lineTo(28, 256);
+            ctx.fill();
+
+            for (let i = 0; i < 10; i++) {
+                const y = i * 25;
+                const width = 10 + i * 5;
+                ctx.beginPath();
+                ctx.moveTo(64 - width, y + 20);
+                ctx.lineTo(64 + width, y + 20);
+                ctx.lineTo(64, y);
+                ctx.fill();
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            return new THREE.MeshBasicMaterial({
+                map: tex,
+                alphaTest: 0.5,
+                transparent: true,
+                side: THREE.DoubleSide,
+                color: COLORS.tree
+            });
+        }
+
+        function createRoadTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, 512, 512);
+            ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 15;
+            ctx.beginPath(); ctx.moveTo(15, 0); ctx.lineTo(15, 512); ctx.moveTo(497, 0); ctx.lineTo(497, 512); ctx.stroke();
+            ctx.strokeStyle = '#f2a900'; ctx.lineWidth = 10; ctx.setLineDash([40, 40]);
+            ctx.beginPath(); ctx.moveTo(256, 0); ctx.lineTo(256, 512); ctx.stroke();
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            return tex;
+        }
+
+        function spawnSegment() {
+            // 1. ROAD MESH
+            const roadGeo = new THREE.PlaneGeometry(ROAD_WIDTH, SEGMENT_LENGTH, 1, SEGMENT_RES);
+            const roadMat = new THREE.MeshStandardMaterial({ map: roadTexture, roughness: 0.8 });
+            const roadMesh = new THREE.Mesh(roadGeo, roadMat);
+            roadMesh.rotation.x = -Math.PI / 2;
+
+            const pos = roadGeo.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const vZ = -currentZ - (pos.getY(i) + SEGMENT_LENGTH/2);
+                pos.setX(i, pos.getX(i) + getRoadX(-vZ));
+            }
+            pos.needsUpdate = true;
+            roadMesh.position.z = -currentZ - SEGMENT_LENGTH / 2;
+            scene.add(roadMesh);
+
+            // 2. TREE INSTANCED MESH
+            // 2 planes per tree to make an X shape
+            const treeGeo = new THREE.PlaneGeometry(4, 12);
+            const instancedTrees = new THREE.InstancedMesh(treeGeo, treeMaterial, TREES_PER_SEGMENT * 2);
+            
+            const dummy = new THREE.Object3D();
+            for (let i = 0; i < TREES_PER_SEGMENT; i++) {
+                // Random position relative to road
+                const side = Math.random() > 0.5 ? 1 : -1;
+                const distance = ROAD_WIDTH / 2 + Math.random() * 40; // Don't spawn on road
+                const zPos = -currentZ - (Math.random() * SEGMENT_LENGTH);
+                const xPos = getRoadX(-zPos) + (side * distance);
+
+                const scale = 0.5 + Math.random() * 1.5;
+                const tilt = (Math.random() - 0.5) * 0.1; // Organic tilt
+
+                // Set transform for plane 1
+                dummy.position.set(xPos, 6 * scale, zPos);
+                dummy.rotation.set(tilt, Math.random() * Math.PI, 0);
+                dummy.scale.set(scale, scale, scale);
+                dummy.updateMatrix();
+                instancedTrees.setMatrixAt(i * 2, dummy.matrix);
+
+                // Set transform for plane 2 (rotated 90 deg to make 'X')
+                dummy.rotation.y += Math.PI / 2;
+                dummy.updateMatrix();
+                instancedTrees.setMatrixAt(i * 2 + 1, dummy.matrix);
+            }
+            scene.add(instancedTrees);
+
+            roadSegments.push({ road: roadMesh, trees: instancedTrees });
+            currentZ += SEGMENT_LENGTH;
+        }
+
+        function updatePhysics() {
+            const forwardInput = keys.w || keys.arrowup || controllerGas;
+            const backInput = keys.s || keys.arrowdown || controllerBrake;
+
+            if (forwardInput && !isCrashed) {
+                speed += ACCEL;
+            } else if (backInput) {
+                speed -= ACCEL;
+            } else {
+                speed *= FRICTION;
+            }
+            speed = Math.max(Math.min(speed, MAX_SPEED), -MAX_SPEED);
+
+            if (Math.abs(speed) > 0.01) {
+                const steerLeft = keys.a || keys.arrowleft;
+                const steerRight = keys.d || keys.arrowright;
+                const controllerSteerNormalized = isPhoneConnected ? -controllerSteer / 90 : 0;
+                const steerDir = isPhoneConnected
+                    ? controllerSteerNormalized
+                    : steerLeft ? 1 : steerRight ? -1 : 0;
+                document.getElementById('speed-ui').textContent = speed.toFixed(2); 
+                carAngle += steerDir * STEER_SPEED * (speed / MAX_SPEED);
+            }
+
+            car.position.z -= Math.cos(carAngle) * speed;
+            car.position.x -= Math.sin(carAngle) * speed;
+            car.rotation.y = carAngle;
+
+            const roadCenterX = getRoadX(-car.position.z);
+            const distFromCenter = Math.abs(car.position.x - roadCenterX);
+
+            if (distFromCenter > (ROAD_WIDTH + 5) / 2) {
+                isCrashed = true;
+                speed *= 0.85;
+                if (crashMsg) crashMsg.style.display = 'block';
+            } else {
+                isCrashed = false;
+                if (crashMsg) crashMsg.style.display = 'none';
+            }
+
+            if (distEl) {
+                distEl.textContent = `${Math.floor(Math.abs(car.position.z))}`;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updatePhysics();
+
+            // --- CAMERA: Elastic Cinematic Follow ---
+            // Camera chases a point behind the car
+            const camDist = 10;
+            const camHeight = 2;
+            const camTargetZ = car.position.z + camDist * Math.cos(carAngle);
+            const camTargetX = car.position.x + camDist * Math.sin(carAngle);
+            
+            // Smooth lerp (0.1) creates the "lag" effect
+            camera.position.x += (camTargetX - camera.position.x) * 0.2;
+            camera.position.z += (camTargetZ - camera.position.z) * 0.1;
+            camera.position.y = camHeight;
+
+            // Camera looks at a point far ahead of the car
+            const lookAtZ = car.position.z - 25 * Math.cos(carAngle);
+            const lookAtX = car.position.x - 25 * Math.sin(carAngle);
+            camera.lookAt(lookAtX, 1.4, lookAtZ);
+
+            // --- TREADMILL: Road Recycling ---
+            if (roadSegments.length > 0) {
+                const first = roadSegments[0];
+                // Remove once the car has passed the segment
+                if (car.position.z < first.road.position.z - SEG_LEN) {
+                    scene.remove(first.road); scene.remove(first.trees);
+                    roadSegments.shift();
+                    spawnSegment();
+                }
+            }
+            
+            // Keep ground following player
+            ground.position.set(car.position.x, -0.05, car.position.z);
+            
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>
