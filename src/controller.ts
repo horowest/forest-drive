@@ -30,7 +30,6 @@ let activeSensorApi = 'none';
 let computedSteerAngle = 0;
 let lastSentPayloadStr = '';
 let pingInterval: number | null = null;
-let wakeLock: any = null;
 
 // DOM Elements
 const onboardingOverlay = document.getElementById('onboarding-overlay') as HTMLDivElement;
@@ -39,7 +38,6 @@ const btnCalibrate = document.getElementById('btn-calibrate') as HTMLButtonEleme
 const btnGas = document.getElementById('btn-gas') as HTMLDivElement;
 const btnBrake = document.getElementById('btn-brake') as HTMLDivElement;
 const steerVal = document.getElementById('steer-val') as HTMLSpanElement;
-const pingVal = document.getElementById('ping-val') as HTMLSpanElement;
 const mobileSvgWheel = document.getElementById('mobile-svg-wheel') as unknown as SVGElement;
 const connPill = document.getElementById('conn-pill') as HTMLDivElement;
 const onboardingStatus = document.getElementById('onboarding-status') as HTMLSpanElement;
@@ -143,13 +141,11 @@ function updateConnectionUI(connected: boolean) {
 }
 
 // Latency Meter
-let pingStartTime = 0;
 function startPingTimer() {
   stopPingTimer();
   
   pingInterval = window.setInterval(() => {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      pingStartTime = performance.now();
       socket.send(JSON.stringify({ type: 'ping' }));
     }
   }, 2000);
@@ -172,7 +168,7 @@ function stopPingTimer() {
 async function requestWakeLock() {
   try {
     if ('wakeLock' in navigator) {
-      wakeLock = await (navigator as any).wakeLock.request('screen');
+      await (navigator as any).wakeLock.request('screen');
       console.log('[WakeLock] Screen Wake Lock activated');
     }
   } catch (err) {

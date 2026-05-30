@@ -1,27 +1,8 @@
 import * as THREE from 'three';
-import QRCode from 'qrcode';
-import { type ControlPayload } from './types';
+import { connectWebSocket, controllerState } from './network';
 
-const statusDot = document.getElementById('status-dot');
-const statusText = document.getElementById('status-text');
-const pairingPanel = document.getElementById('pairing-panel');
-const qrCanvas = document.getElementById('qr-canvas');
-const qrLoader = document.getElementById('qr-loader');
-const roomCodeEl = document.getElementById('room-code');
-const calibrationAlert = document.getElementById('calibration-alert');
 const distEl = document.getElementById('dist');
 const crashMsg = document.getElementById('crash-msg');
-
-let socket: WebSocket | null = null;
-let roomId = '';
-let serverLanIp = 'localhost';
-let isPhoneConnected = false;
-let lastPingTime = 0;
-let latencyInterval: number | null = null;
-
-let controllerSteer = 0;
-let controllerGas = false;
-let controllerBrake = false;
 
 // --- 1. CONFIGURATION ---
 const COLORS = {
@@ -96,145 +77,7 @@ let carAngle = 0;
 let isCrashed = false;
 const keys: Record<string, boolean> = { w: false, s: false, a: false, d: false, arrowup: false, arrowdown: false, arrowleft: false, arrowright: false };
 
-function generateRoomId() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let result = '';
-    for (let i = 0; i < 4; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-}
 
-function connectWebSocket() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-    socket = new WebSocket(wsUrl);
-
-    socket.onopen = () => {
-        roomId = generateRoomId();
-        if (roomCodeEl) roomCodeEl.textContent = roomId;
-        if (socket) socket.send(JSON.stringify({ type: 'join', room: roomId, role: 'interface' }));
-    };
-
-    socket.onmessage = ({ data }) => {
-        try {
-            const parsed = JSON.parse(data.toString());
-
-            switch (parsed.type) {
-                case 'server_ip':
-                    serverLanIp = parsed.ip || serverLanIp;
-                    generatePairingQRCode();
-                    break;
-                case 'peer_status':
-                    if (parsed.role === 'controller') {
-                        parsed.status === 'connected' ? handlePhoneConnected() : handlePhoneDisconnected();
-                    }
-                    break;
-                case 'motion':
-                    handleMotionInput(parsed);
-                    break;
-                case 'calibrate':
-                    triggerCalibrationAlert();
-                    break;
-                case 'pong':
-                    handlePongReceived();
-                    break;
-            }
-        } catch (error) {
-            console.error('[WS] Home parse error', error);
-        }
-    };
-
-    socket.onclose = () => {
-        handlePhoneDisconnected();
-        setTimeout(connectWebSocket, 3000);
-    };
-}
-
-function generatePairingQRCode() {
-    if (!qrCanvas) return;
-    if (qrLoader) qrLoader.textContent = 'Generating pairing QR…';
-    const port = window.location.port ? `:${window.location.port}` : '';
-    const hostname = (serverLanIp === 'localhost' || serverLanIp === '127.0.0.1') ? window.location.hostname : serverLanIp;
-    const pairingUrl = `${window.location.protocol}//${hostname}${port}/controller.html?room=${roomId}`;
-
-    QRCode.toCanvas(qrCanvas, pairingUrl, {
-        width: 200,
-        margin: 1,
-        color: { dark: '#030712', light: '#ffffff' }
-    }).then(() => {
-        if (qrLoader) qrLoader.style.display = 'none';
-    }).catch((error) => {
-        console.error('[QR] Failed to generate QR code', error);
-        if (qrLoader) qrLoader.textContent = 'QR generation failed';
-    });
-}
-
-function handlePhoneConnected() {
-    isPhoneConnected = true;
-    statusDot?.classList.remove('disconnected');
-    statusDot?.classList.add('connected');
-    if (statusText) statusText.textContent = 'PHONE CONTROLLER CONNECTED';
-    if (pairingPanel) pairingPanel.style.display = 'none';
-    showCalibrationMessage('PHONE CONNECTED');
-    startLatencyMonitor();
-}
-
-function handlePhoneDisconnected() {
-    isPhoneConnected = false;
-    statusDot?.classList.remove('connected');
-    statusDot?.classList.add('disconnected');
-    if (statusText) statusText.textContent = 'WAITING FOR PHONE CONTROLLER';
-    if (pairingPanel) pairingPanel.style.display = 'flex';
-    controllerSteer = 0;
-    controllerGas = false;
-    controllerBrake = false;
-    showCalibrationMessage('PHONE DISCONNECTED');
-    stopLatencyMonitor();
-}
-
-function triggerCalibrationAlert() {
-    showCalibrationMessage('CALIBRATED');
-}
-
-function showCalibrationMessage(message: string) {
-    if (!calibrationAlert) return;
-    calibrationAlert.textContent = message;
-    calibrationAlert.classList.add('show');
-    setTimeout(() => calibrationAlert.classList.remove('show'), 1200);
-}
-
-function handleMotionInput(data: ControlPayload) {
-    if (!isPhoneConnected) return;
-    controllerSteer = Number(data.steeringAngle ?? 0);
-    const steerElement = document.getElementById('steer');
-    if (steerElement) steerElement.textContent = (-controllerSteer).toFixed(2);
-    controllerGas = Boolean(data.gas);
-    controllerBrake = Boolean(data.brake);
-}
-
-function startLatencyMonitor() {
-    stopLatencyMonitor();
-    latencyInterval = window.setInterval(() => {
-        if (socket && socket.readyState === WebSocket.OPEN && isPhoneConnected) {
-            lastPingTime = performance.now();
-            socket.send(JSON.stringify({ type: 'ping' }));
-        }
-    }, 1500);
-}
-
-function stopLatencyMonitor() {
-    if (latencyInterval !== null) {
-        window.clearInterval(latencyInterval);
-        latencyInterval = null;
-    }
-}
-
-function handlePongReceived() {
-    const latency = Math.round(performance.now() - lastPingTime);
-    console.log(`[WS] Home latency ${latency} ms`);
-}
 
 function getRoadX(z: number) {
     const absZ = Math.abs(z);
@@ -314,29 +157,29 @@ function updateFog(delta: number) {
 
 function calculateAcceleration(currentSpeed: number, throttleApplied: boolean) {
     if (!throttleApplied) return 0;
-    
+
     const normalizedSpeed = currentSpeed / MAX_SPEED; // 0 to 1
-    
+
     // Stage 1: Initial drag (0 to 0.05) - Hard to start moving
     if (currentSpeed < INITIAL_DRAG_THRESHOLD) {
         // Exponential curve: hard to overcome inertia initially
         return BASE_ACCEL * 2.5;
     }
-    
+
     // Stage 2: Mid-range (0.05 to 1.0) - Easy acceleration
     if (currentSpeed < MID_RANGE_SPEED) {
         // Linear acceleration, easier in this range
         const progress = (currentSpeed - INITIAL_DRAG_THRESHOLD) / (MID_RANGE_SPEED - INITIAL_DRAG_THRESHOLD);
         return BASE_ACCEL * (2.0 - progress * 0.5); // Gradually decrease from 2.0 to 1.5
     }
-    
+
     // Stage 3: High speed (1.0 to 1.5) - Diminishing returns
     if (currentSpeed < HIGH_SPEED_THRESHOLD) {
         // Moderate deceleration of acceleration
         const progress = (currentSpeed - MID_RANGE_SPEED) / (HIGH_SPEED_THRESHOLD - MID_RANGE_SPEED);
         return BASE_ACCEL * (1.5 - progress * 0.8); // 1.5 down to 0.7
     }
-    
+
     // Stage 4: Approaching max speed (1.5 to 2.0) - Very slow acceleration
     const remainingRoom = 1 - normalizedSpeed;
     return BASE_ACCEL * 0.3 * remainingRoom; // Exponential drop-off
@@ -485,7 +328,7 @@ function spawnSegment() {
 
     const pos = roadGeo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
-        const vZ = -currentZ - (pos.getY(i) + SEGMENT_LENGTH/2);
+        const vZ = -currentZ - (pos.getY(i) + SEGMENT_LENGTH / 2);
         pos.setX(i, pos.getX(i) + getRoadX(-vZ));
     }
     pos.needsUpdate = true;
@@ -496,7 +339,7 @@ function spawnSegment() {
     // 2 planes per tree to make an X shape
     const treeGeo = new THREE.PlaneGeometry(4, 12);
     const instancedTrees = new THREE.InstancedMesh(treeGeo, treeMaterial, TREES_PER_SEGMENT * 2);
-    
+
     const dummy = new THREE.Object3D();
     for (let i = 0; i < TREES_PER_SEGMENT; i++) {
         // Random position relative to road
@@ -527,15 +370,15 @@ function spawnSegment() {
 }
 
 function updatePhysics() {
-    const forwardInput = keys.w || keys.arrowup || controllerGas;
-    const backInput = keys.s || keys.arrowdown || controllerBrake;
+    const forwardInput = keys.w || keys.arrowup || controllerState.gas;
+    const backInput = keys.s || keys.arrowdown || controllerState.brake;
     const throttle = forwardInput && !isCrashed;
     const speedClassEl = document.getElementById('speed-class');
 
     if (throttle) {
         // Apply stage-based acceleration
         speed += calculateAcceleration(speed, true);
-        
+
         // Determine speed stage for display
         if (speedClassEl) {
             if (speed < INITIAL_DRAG_THRESHOLD) {
@@ -561,15 +404,15 @@ function updatePhysics() {
         const drag = calculateDrag(speed);
         speed *= (1 - drag);
     }
-    
+
     // Clamp speed
     speed = Math.max(Math.min(speed, MAX_SPEED), -MAX_SPEED);
 
     if (Math.abs(speed) > 0.01) {
         const steerLeft = keys.a || keys.arrowleft;
         const steerRight = keys.d || keys.arrowright;
-        const controllerSteerNormalized = isPhoneConnected ? -controllerSteer / 90 : 0;
-        const steerDir = isPhoneConnected
+        const controllerSteerNormalized = controllerState.isPhoneConnected ? -controllerState.steer / 90 : 0;
+        const steerDir = controllerState.isPhoneConnected
             ? controllerSteerNormalized
             : steerLeft ? 1 : steerRight ? -1 : 0;
         const speedUi = document.getElementById('speed-ui');
@@ -594,7 +437,7 @@ function updatePhysics() {
     }
 
     if (distEl) {
-        const value = Math.floor(Math.abs(car.position.z))/10;
+        const value = Math.floor(Math.abs(car.position.z)) / 10;
         distEl.textContent = value.toFixed(0);
     }
 }
@@ -615,7 +458,7 @@ function animate() {
     const camHeight = 2;
     const camTargetZ = car.position.z + camDist * Math.cos(carAngle);
     const camTargetX = car.position.x + camDist * Math.sin(carAngle);
-    
+
     // Smooth lerp (0.1) creates the "lag" effect
     camera.position.x += (camTargetX - camera.position.x) * 0.2;
     camera.position.z += (camTargetZ - camera.position.z) * 0.2;
@@ -631,15 +474,21 @@ function animate() {
         const first = roadSegments[0];
         // Remove once the car has passed the segment
         if (car.position.z < first.road.position.z - SEG_LEN) {
-            scene.remove(first.road); scene.remove(first.trees);
+            // Remove and dispose meshes to prevent memory leaks
+            scene.remove(first.road);
+            scene.remove(first.trees);
+
+            first.road.geometry.dispose();
+            first.trees.geometry.dispose();
+
             roadSegments.shift();
             spawnSegment();
         }
     }
-    
+
     // Keep ground following player
     ground.position.set(car.position.x, -0.05, car.position.z);
-    
+
     renderer.render(scene, camera);
 }
 

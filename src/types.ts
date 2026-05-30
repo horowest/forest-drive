@@ -17,3 +17,10 @@ export interface ControlPayload {
     activeApi: string;
   };
 }
+
+export const controllerState = {
+  isPhoneConnected: false,
+  steer: 0,
+  gas: false,
+  brake: false
+};
