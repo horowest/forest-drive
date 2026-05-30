@@ -1,0 +1,21 @@
+{
+  "name": "forest-drive-clean",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6",
+    "@types/three": "^0.184.1",
+    "@types/ws": "^8.18.1",
+    "qrcode": "^1.5.4",
+    "three": "^0.184.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12",
+    "ws": "^8.21.0"
+  }
+}
